@@ -7,6 +7,8 @@ rootfs_img=$PWD"/rootfs_img"
 
 make LLVM=1
 echo $base_path
+read -p "Press entry to conteniue" name
+
 if [ ! -d $rootfs ]; then
     mkdir $rootfs
 fi

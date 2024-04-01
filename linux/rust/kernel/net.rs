@@ -7,13 +7,7 @@
 //! [`include/linux/skbuff.h`](../../../../include/linux/skbuff.h).
 
 use crate::{
-    bindings, device,
-    error::{code::ENOMEM, from_kernel_result},
-    str::CStr,
-    sync::UniqueArc,
-    to_result,
-    types::PointerWrapper,
-    ARef, AlwaysRefCounted, Error, Result,
+    bindings, device, error::{code::ENOMEM, from_kernel_result}, pr_info, str::CStr, sync::UniqueArc, to_result, types::PointerWrapper, ARef, AlwaysRefCounted, Error, Result
 };
 use core::{
     cell::UnsafeCell,
@@ -201,6 +195,7 @@ impl<T: DeviceOperations> Registration<T> {
 
 impl<T: DeviceOperations> Drop for Registration<T> {
     fn drop(&mut self) {
+        pr_info!("Rust for linux e1000 driver demo(unregister_netdev)\n");
         // SAFETY: `dev` was allocated during initialization and guaranteed to be valid.
         unsafe {
             if self.registered {
