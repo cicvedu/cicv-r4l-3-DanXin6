@@ -79,6 +79,7 @@ impl<T: Driver> Adapter<T> {
     }
 
     extern "C" fn remove_callback(pdev: *mut bindings::pci_dev) {
+        let mut dev = unsafe { Device::from_ptr(pdev) };
         // SAFETY: `pdev` is guaranteed to be a valid, non-null pointer.
         let ptr = unsafe { bindings::pci_get_drvdata(pdev) };
         // SAFETY:
@@ -88,7 +89,7 @@ impl<T: Driver> Adapter<T> {
         //     `remove` is the canonical kernel location to free driver data. so OK
         //     to convert the pointer back to a Rust structure here.
         let data = unsafe { T::Data::from_pointer(ptr) };
-        T::remove(&data);
+        T::remove(&mut dev, &data);
         <T::Data as driver::DeviceRemoval>::device_remove(&data);
     }
 }
@@ -224,7 +225,7 @@ pub trait Driver {
     ///
     /// Called when a platform device is removed.
     /// Implementers should prepare the device for complete removal here.
-    fn remove(_data: &Self::Data);
+    fn remove(dev: &mut Device, _data: &Self::Data);
 }
 
 /// PCI resource
@@ -294,6 +295,12 @@ impl Device {
         }
     }
 
+    /// Disable device
+    pub fn disable_device(&mut self) {
+        // SAFETY: By the type invariants, we know that `self.ptr` is non-null and valid.
+        unsafe { bindings::pci_disable_device(self.ptr) };
+    }
+
     /// iter PCI Resouces
     pub fn iter_resource(&self) -> impl Iterator<Item = Resource> + '_ {
         // SAFETY: By the type invariants, we know that `self.ptr` is non-null and valid.
@@ -321,6 +328,12 @@ impl Device {
         } else {
             Ok(())
         }
+    }
+
+    /// Release selected PCI I/O and memory resources
+    pub fn release_selected_regions(&mut self, bars: i32) {
+        // SAFETY: By the type invariants, we know that `self.ptr` is non-null and valid.
+        unsafe { bindings::pci_release_selected_regions(self.ptr, bars) };
     }
 
     /// Get address for accessing the device

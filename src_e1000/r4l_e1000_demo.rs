@@ -4,9 +4,12 @@
 
 #![allow(unused)]
 
+use core::clone::Clone;
 use core::iter::Iterator;
+use core::ops::{Deref, DerefMut};
 use core::sync::atomic::AtomicPtr;
 
+use alloc::borrow::BorrowMut;
 use kernel::pci::Resource;
 use kernel::prelude::*;
 use kernel::sync::Arc;
@@ -189,7 +192,7 @@ impl net::DeviceOperations for NetDevice {
         Ok(())
     }
 
-    fn stop(_dev: &net::Device, _data: &NetDevicePrvData) -> Result {
+    fn stop(dev: &net::Device, data: &NetDevicePrvData) -> Result {
         pr_info!("Rust for linux e1000 driver demo (net device stop)\n");
         Ok(())
     }
@@ -298,6 +301,9 @@ struct E1000DrvPrvData {
 impl driver::DeviceRemoval for E1000DrvPrvData {
     fn device_remove(&self) {
         pr_info!("Rust for linux e1000 driver demo (device_remove)\n");
+        let net_device = self._netdev_reg.dev_get();
+        net_device.deref().netif_carrier_off();
+        net_device.deref().netif_stop_queue();
     }
 }
 
@@ -466,8 +472,35 @@ impl pci::Driver for E1000Drv {
         )?)
     }
 
-    fn remove(data: &Self::Data) {
+    fn remove(dev: &mut pci::Device, data: &Self::Data) {
         pr_info!("Rust for linux e1000 driver demo (remove)\n");
+        let mut net_device = data._netdev_reg.dev_get();
+        net_device.deref().netif_carrier_off();
+        net_device.deref().netif_stop_queue();
+        
+        let drvdata = data._netdev_reg.get_drvdata();
+        pr_info!("Rust for linux e1000 driver demo (net device stop) 1\n");
+        drvdata.e1000_hw_ops.deref().e1000_reset_hw();
+        pr_info!("Rust for linux e1000 driver demo (net device stop) 2\n");
+        // free the tx and rx ring buffer
+        drvdata.tx_ring.lock_irqdisable().deref_mut().take();
+        drvdata.rx_ring.lock_irqdisable().deref_mut().take();
+
+        pr_info!("Rust for linux e1000 driver demo (net device stop) 3\n");
+        // free the irq handler
+        let irq_handler = data._netdev_reg.get_drvdata()._irq_handler.load(core::sync::atomic::Ordering::Relaxed);
+        if !irq_handler.is_null() {
+            let irq_handler = unsafe{Box::from_raw(irq_handler)};
+            drop(irq_handler);
+        }
+        
+        pr_info!("Rust for linux e1000 driver demo (net device stop) 4\n");
+        // let napi = drvdata.napi.deref();
+        // napi.disable();
+        dev.disable_device();
+        let bars = dev.select_bars((bindings::IORESOURCE_MEM | bindings::IORESOURCE_IO) as u64);
+        dev.release_selected_regions(bars);
+        pr_info!("Rust for linux e1000 driver demo (net device stop) 5\n");
     }
 }
 struct E1000KernelMod {
@@ -488,5 +521,6 @@ impl kernel::Module for E1000KernelMod {
 impl Drop for E1000KernelMod {
     fn drop(&mut self) {
         pr_info!("Rust for linux e1000 driver demo (exit)\n");
+        drop(&self._dev)
     }
 }

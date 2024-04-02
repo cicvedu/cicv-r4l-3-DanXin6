@@ -9,6 +9,7 @@
 use crate::{
     bindings, device,
     error::{code::ENOMEM, from_kernel_result},
+    pr_info,
     str::CStr,
     sync::UniqueArc,
     to_result,
@@ -197,10 +198,17 @@ impl<T: DeviceOperations> Registration<T> {
             Ok(())
         }
     }
+
+    /// Returns the driver data.
+    pub fn get_drvdata(&self) -> <<T as DeviceOperations>::Data as PointerWrapper>::Borrowed<'_> {
+        // SAFETY: `dev` was allocated during initialization and is guaranteed to be valid.
+        unsafe { T::Data::borrow(bindings::dev_get_drvdata(&mut (*self.dev).dev)) }
+    }
 }
 
 impl<T: DeviceOperations> Drop for Registration<T> {
     fn drop(&mut self) {
+        pr_info!("Dropping network device\n");
         // SAFETY: `dev` was allocated during initialization and guaranteed to be valid.
         unsafe {
             if self.registered {
@@ -477,6 +485,12 @@ impl Napi {
         unsafe {
             bindings::napi_enable(self.0.get());
         }
+    }
+
+    /// Disable NAPI scheduling.
+    pub fn disable(&self) {
+        // SAFETY: The existence of a shared reference means `self.0` is valid.
+        unsafe { bindings::napi_disable(self.0.get()) }
     }
 
     /// Schedule NAPI poll routine to be called if it is not already running.
