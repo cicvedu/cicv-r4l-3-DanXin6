@@ -18,13 +18,12 @@ module! {
     license: "GPL",
 }
 
-static GLOBALMEM_BUF: Mutex<[u8;GLOBALMEM_SIZE]> = unsafe {
-    Mutex::new([0u8;GLOBALMEM_SIZE])
-};
-
+/// 当前所有的数据都存在一起， 暂不支持多线程， 也不支持多个文件同时操
+static GLOBALMEM_BUF: Mutex<[u8; GLOBALMEM_SIZE]> = unsafe { Mutex::new([0u8; GLOBALMEM_SIZE]) };
+static GLOBALMEM_OFFSET: Mutex<usize> = unsafe { Mutex::new(0) };
 struct RustFile {
-    #[allow(dead_code)]
-    inner: &'static Mutex<[u8;GLOBALMEM_SIZE]>,
+    inner: &'static Mutex<[u8; GLOBALMEM_SIZE]>,
+    offset: &'static Mutex<usize>,
 }
 
 #[vtable]
@@ -32,19 +31,62 @@ impl file::Operations for RustFile {
     type Data = Box<Self>;
 
     fn open(_shared: &(), _file: &file::File) -> Result<Box<Self>> {
-        Ok(
-            Box::try_new(RustFile {
-                inner: &GLOBALMEM_BUF
-            })?
-        )
+        Ok(Box::try_new(RustFile {
+            inner: &GLOBALMEM_BUF,
+            offset: &GLOBALMEM_OFFSET,
+        })?)
     }
 
-    fn write(_this: &Self,_file: &file::File,_reader: &mut impl kernel::io_buffer::IoBufferReader,_offset:u64,) -> Result<usize> {
-        Err(EPERM)
+    fn write(
+        this: &Self,
+        _file: &file::File,
+        reader: &mut impl kernel::io_buffer::IoBufferReader,
+        _offset: u64,
+    ) -> Result<usize> {
+        pr_info!("Rust character device sample (write)\n");
+        let buf = reader.read_all()?;
+        // if buf.is_empty() {
+        //     return Ok(0);
+        // }
+
+        buf.iter().for_each(|b| pr_info!("{} ", b));
+
+        pr_info!(
+            "Rust character device sample (write) - write {} bytes\n",
+            buf.len()
+        );
+        let mut globalmem = this.inner.lock();
+
+        let offset = *this.offset.lock();
+        if offset + buf.len() > GLOBALMEM_SIZE {
+            return Err(ENOSR)
+        }
+
+        globalmem[offset..offset + buf.len()].copy_from_slice(&buf);
+        // globalmem[..buf.len()].copy_from_slice(&buf);
+        // *this.w_offset.lock() = buf.len();
+        *this.offset.lock() += buf.len();
+
+        pr_info!("Rust character device sample (write) - write offset: {}\n", *this.offset.lock());
+        Ok(buf.len())
     }
 
-    fn read(_this: &Self,_file: &file::File,_writer: &mut impl kernel::io_buffer::IoBufferWriter,_offset:u64,) -> Result<usize> {
-        Err(EPERM)
+    fn read(
+        this: &Self,
+        _file: &file::File,
+        writer: &mut impl kernel::io_buffer::IoBufferWriter,
+        _offset: u64,
+    ) -> Result<usize> {
+        pr_info!("Rust character device sample (read)\n");
+        let globalmem = this.inner.lock();
+
+        let len = *this.offset.lock();
+        pr_info!("Rust character device sample (read) - read len: {}\n", writer.len());
+        writer.write_slice(&globalmem[..len])?;
+
+        *this.offset.lock() = 0;
+        
+        Ok(len)
     }
 }
 
